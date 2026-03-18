@@ -1,0 +1,8 @@
+pymupdf==1.24.11          # extração de texto de PDFs
+openai>=1.52.0            # embeddings
+psycopg2-binary==2.9.9    # postgres
+watchdog==4.0.1           # monitoramento de pasta
+tiktoken==0.7.0           # contagem de tokens
+python-dotenv==1.0.1
+tenacity==8.3.0           # retry com backoff
+rich==13.7.1              # logs legíveis

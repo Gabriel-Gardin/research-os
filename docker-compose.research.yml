@@ -1,0 +1,78 @@
+# docker-compose.research.yml
+# Serviços de research que se conectam ao Postgres do Supabase.
+# Rode SEMPRE depois de `scripts/start.sh` ter subido o Supabase.
+#
+# Uso:
+#   docker compose --project-name research -f docker-compose.research.yml \
+#     --env-file .env --env-file .env.research up -d --build
+
+version: "3.9"
+
+# ── Rede compartilhada com o Supabase ─────────────────────────────────────────
+networks:
+  supabase_default:
+    external: true   # criada pelo compose do Supabase (project-name=supabase)
+
+# ── Volume para imports monitorados ───────────────────────────────────────────
+volumes:
+  imports:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${IMPORTS_DIR:-./imports}
+
+# ──────────────────────────────────────────────────────────────────────────────
+services:
+
+  # ── research-worker ──────────────────────────────────────────────────────────
+  # Pipeline de ingestão: monitora ./imports/, extrai texto, gera embeddings
+  # e popula o Postgres.
+  research-worker:
+    build:
+      context: ./research-worker
+      dockerfile: Dockerfile
+    container_name: research-worker
+    restart: unless-stopped
+    env_file:
+      - .env.research
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@db:5432/postgres
+      IMPORTS_DIR: /imports
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      EMBEDDING_MODEL: text-embedding-3-small
+      EMBEDDING_DIM: 1536
+      CHUNK_SIZE: 512
+      CHUNK_OVERLAP: 64
+    volumes:
+      - imports:/imports
+      - ./research-worker:/app   # hot-reload em dev
+    networks:
+      - supabase_default
+    depends_on: []   # postgres já está no ar via Supabase
+    command: python -u watcher.py
+
+  # ── research-mcp ─────────────────────────────────────────────────────────────
+  # Servidor MCP (stdio ou SSE) que expõe tools para a LLM.
+  research-mcp:
+    build:
+      context: ./research-mcp
+      dockerfile: Dockerfile
+    container_name: research-mcp
+    restart: unless-stopped
+    env_file:
+      - .env.research
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@db:5432/postgres
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      EMBEDDING_MODEL: text-embedding-3-small
+      EMBEDDING_DIM: 1536
+      MCP_PORT: 8080
+      MCP_TRANSPORT: sse      # "sse" para HTTP, "stdio" para Claude Desktop
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./research-mcp:/app   # hot-reload em dev
+    networks:
+      - supabase_default
+    command: python -u server.py

@@ -1,6 +1,3 @@
-# research-os
-
-
 # Research OS
 
 Sistema pessoal de pesquisa para **engenharia de vibrações**, **detecção de vazamentos** e temas correlatos, com foco em:
