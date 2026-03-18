@@ -79,26 +79,32 @@ docker logs -f research-worker
 
 ## Conectar o MCP ao Claude
 
-### Claude Desktop (local, stdio)
+### Claude Code CLI (recomendado para uso local no Ubuntu)
 
-Edite `~/Library/Application Support/Claude/claude_desktop_config.json`:
+Com o `research-mcp` no ar, registre o servidor uma única vez:
 
-```json
-{
-  "mcpServers": {
-    "research-os": {
-      "command": "docker",
-      "args": [
-        "exec", "-i", "research-mcp",
-        "python", "server.py"
-      ],
-      "env": {
-        "MCP_TRANSPORT": "stdio"
-      }
-    }
-  }
-}
+```bash
+claude mcp add --transport sse research-os http://localhost:8080/sse
 ```
+
+Verifique se foi registrado:
+
+```bash
+claude mcp list
+```
+
+Abra o Claude Code normalmente:
+
+```bash
+claude
+```
+
+As tools aparecem listadas como `mcp__research-os__*`. Exemplo de uso dentro do chat:
+
+> "Use search_library para buscar sobre cross-correlation em detecção de vazamentos"
+
+O registro é persistente — não é necessário repetir o `mcp add` nas próximas sessões.
+Basta garantir que `./scripts/start.sh` foi rodado antes de abrir o Claude Code.
 
 ### Claude.ai (remote MCP via SSE)
 

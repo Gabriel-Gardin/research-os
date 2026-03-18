@@ -20,3 +20,5 @@ __pycache__/
 
 # Misc
 .DS_Store
+imports/*
+!imports/.gitkeep
