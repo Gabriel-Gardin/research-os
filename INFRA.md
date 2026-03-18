@@ -139,6 +139,41 @@ ORDER BY created_at DESC;
 
 ---
 
+## Índices vetoriais
+
+O schema cria índices IVFFlat para busca vetorial, mas eles exigem um mínimo de linhas para funcionar corretamente. Se você rodar pela primeira vez com poucos documentos, os índices precisam ser dropados para o Postgres usar sequential scan automaticamente:
+
+```bash
+docker exec supabase-db psql -U postgres -d postgres << 'SQL'
+DROP INDEX IF EXISTS idx_chunks_embedding;
+DROP INDEX IF EXISTS idx_memories_embedding;
+SQL
+```
+
+**Isso só precisa ser feito uma vez**, logo após o primeiro `start.sh`. A partir daí, novos documentos são indexados e buscados automaticamente sem nenhuma ação adicional.
+
+Quando a biblioteca crescer, recriar os índices melhora a performance:
+
+| Tamanho da coleção | Ação recomendada |
+|--------------------|------------------|
+| < 1.000 chunks (~30 artigos) | Sem índice (sequential scan) |
+| ~10.000 chunks (~300 artigos) | Recriar com `lists = 100` |
+| ~100.000 chunks (~3000 artigos) | Recriar com `lists = 300` |
+
+**Comando para recriar quando necessário:**
+```sql
+-- Ajuste o valor de lists conforme a tabela acima
+CREATE INDEX idx_chunks_embedding
+  ON chunks USING ivfflat (embedding vector_cosine_ops)
+  WITH (lists = 100);
+
+CREATE INDEX idx_memories_embedding
+  ON memories USING ivfflat (embedding vector_cosine_ops)
+  WITH (lists = 50);
+```
+
+---
+
 ## Estrutura do repositório
 
 ```
