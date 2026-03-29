@@ -19,7 +19,9 @@ Tools implementadas:
 import json
 import logging
 import os
+from datetime import datetime, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import psycopg2
 from dotenv import load_dotenv
@@ -420,6 +422,140 @@ def update_memory_status(memory_id: str, status: str, note: str | None = None) -
         return {"error": "Memória não encontrada."}
 
     return {"memory_id": str(row[0]), "type": row[1], "status": row[2]}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TOOLS – LEMBRETES (Google Calendar)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@mcp.tool()
+def create_reminder(
+    title: str,
+    description: str,
+    when: str,
+    duration_minutes: int = 30,
+    reminders_minutes: list[int] = [30, 10],
+    save_to_memory: bool = True,
+) -> dict:
+    """
+    Cria um lembrete/evento no Google Calendar.
+    Opcionalmente salva também na memória de pesquisa.
+
+    Args:
+        title:              Título do lembrete (ex: 'Estudar tópico XYZ').
+        description:        Descrição detalhada do que fazer.
+        when:               Data e hora no formato 'YYYY-MM-DD HH:MM'
+                            ou relativo como 'amanha 10:00', 'semana que vem segunda 09:00'.
+        duration_minutes:   Duração do evento em minutos (default: 30).
+        reminders_minutes:  Lista de antecedência dos alertas em minutos (default: [30, 10]).
+        save_to_memory:     Se True, salva também como memória do tipo 'decision' (default: True).
+    """
+    from gcal import create_event
+
+    TZ = ZoneInfo("America/Sao_Paulo")
+
+    # ── Parse de data/hora ────────────────────────────────────────────────────
+    now = datetime.now(TZ)
+
+    when_lower = when.strip().lower()
+    start_dt = None
+
+    # Relativo: "amanha HH:MM"
+    if when_lower.startswith("amanha") or when_lower.startswith("amanhã"):
+        parts = when_lower.split()
+        time_str = parts[1] if len(parts) > 1 else "09:00"
+        h, m = map(int, time_str.split(":"))
+        start_dt = (now + timedelta(days=1)).replace(hour=h, minute=m, second=0, microsecond=0)
+
+    # Relativo: "semana que vem WEEKDAY HH:MM"
+    elif "semana que vem" in when_lower:
+        parts = when_lower.replace("semana que vem", "").strip().split()
+        weekday_map = {
+            "segunda": 0, "terca": 1, "terça": 1,
+            "quarta": 2, "quinta": 3, "sexta": 4,
+            "sabado": 5, "sábado": 5, "domingo": 6,
+        }
+        weekday = weekday_map.get(parts[0], 0) if parts else 0
+        time_str = parts[1] if len(parts) > 1 else "09:00"
+        h, m = map(int, time_str.split(":"))
+        days_ahead = (weekday - now.weekday() + 7) % 7 or 7
+        start_dt = (now + timedelta(days=days_ahead + 7)).replace(
+            hour=h, minute=m, second=0, microsecond=0
+        )
+
+    # Relativo: "proxima segunda HH:MM" / "próxima segunda 09:00"
+    elif "proxima" in when_lower or "próxima" in when_lower:
+        parts = when_lower.replace("proxima", "").replace("próxima", "").strip().split()
+        weekday_map = {
+            "segunda": 0, "terca": 1, "terça": 1,
+            "quarta": 2, "quinta": 3, "sexta": 4,
+            "sabado": 5, "sábado": 5, "domingo": 6,
+        }
+        weekday = weekday_map.get(parts[0], 0) if parts else 0
+        time_str = parts[1] if len(parts) > 1 else "09:00"
+        h, m = map(int, time_str.split(":"))
+        days_ahead = (weekday - now.weekday() + 7) % 7 or 7
+        start_dt = (now + timedelta(days=days_ahead)).replace(
+            hour=h, minute=m, second=0, microsecond=0
+        )
+
+    # Absoluto: "YYYY-MM-DD HH:MM"
+    else:
+        try:
+            start_dt = datetime.strptime(when.strip(), "%Y-%m-%d %H:%M").replace(tzinfo=TZ)
+        except ValueError:
+            return {
+                "error": (
+                    f"Formato de data não reconhecido: '{when}'. "
+                    "Use 'YYYY-MM-DD HH:MM', 'amanha HH:MM', "
+                    "'proxima segunda HH:MM' ou 'semana que vem segunda HH:MM'."
+                )
+            }
+
+    end_dt = start_dt + timedelta(minutes=duration_minutes)
+
+    # ── Cria evento no Google Calendar ────────────────────────────────────────
+    try:
+        event = create_event(
+            title=title,
+            description=description,
+            start_dt=start_dt,
+            end_dt=end_dt,
+            reminders_minutes=reminders_minutes,
+        )
+    except FileNotFoundError as e:
+        return {"error": str(e)}
+    except Exception as e:
+        return {"error": f"Erro ao criar evento: {e}"}
+
+    result = {
+        "status":   "criado",
+        "title":    event["title"],
+        "start":    event["start"],
+        "end":      event["end"],
+        "link":     event["link"],
+        "event_id": event["event_id"],
+    }
+
+    # ── Salva na memória de pesquisa ──────────────────────────────────────────
+    if save_to_memory:
+        memory_text = (
+            f"Lembrete criado: {title}\n"
+            f"Agendado para: {event['start']}\n"
+            f"Descrição: {description}"
+        )
+        _save_memory(
+            memory_type="decision",
+            text=memory_text,
+            title=f"[Lembrete] {title}",
+            tags=["lembrete", "agenda"],
+            confidence="high",
+            source="chat",
+            evidence_chunk_ids=[],
+        )
+        result["saved_to_memory"] = True
+
+    return result
 
 
 # ══════════════════════════════════════════════════════════════════════════════
