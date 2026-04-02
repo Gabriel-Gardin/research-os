@@ -38,6 +38,7 @@ services:
       - .env.research
     environment:
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@db:5432/postgres
+      TESSDATA_PREFIX: /usr/share/tesseract-ocr/5/tessdata
       IMPORTS_DIR: /imports
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       EMBEDDING_MODEL: text-embedding-3-small
