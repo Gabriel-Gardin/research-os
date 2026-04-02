@@ -50,6 +50,10 @@ def extract_pages(pdf_path: Path) -> list[dict]:
     pages = []
     for i, page in enumerate(doc, start=1):
         text = page.get_text("text")
+        # Fallback para OCR se página não tiver texto
+        if not text.strip():
+            tp = page.get_textpage_ocr(flags=0, language="por+eng", dpi=150)
+            text = page.get_text("text", textpage=tp)
         if text.strip():
             pages.append({"page_number": i, "text": text})
     doc.close()
@@ -188,7 +192,7 @@ def ingest_pdf(pdf_path: Path, metadata: dict | None = None) -> str | None:
                 (
                     doc_id,
                     chunk["chunk_index"],
-                    chunk["text"],
+                    chunk["text"].replace("\x00", ""),
                     chunk["page_number"],
                     chunk["token_count"],
                     json.dumps(emb),   # psycopg2 → pgvector aceita JSON array
