@@ -74,7 +74,7 @@ services:
       - "8080:8080"
     volumes:
       - ./research-mcp:/app   # hot-reload em dev
-      - ./secrets:/secrets:ro  # ← linha nova
+      - ./secrets:/secrets  # ← linha nova
     networks:
       - supabase_default
     command: python -u server.py
