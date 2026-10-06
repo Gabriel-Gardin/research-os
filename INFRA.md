@@ -75,6 +75,20 @@ imports/
 }
 ```
 
+**Extração com MinerU:**
+
+O worker extrai o PDF com o [MinerU](https://github.com/opendatalab/MinerU) rodando localmente em CPU (nenhum arquivo sai da máquina). Equações viram LaTeX, cabeçalhos e rodapés são descartados, os chunks respeitam as seções do documento (coluna `section`) e a lista de referências vai para `documents.metadata.references` em vez de ser indexada. Título, abstract e DOI são detectados quando o `.json` não os informa.
+
+Espere alguns minutos por PDF (~12 s por página). PDFs antigos cuja camada de texto tem fontes de símbolos quebradas (`=` extraído como `¼`, letras gregas como `o`/`Z`) são detectados e passam por OCR completo, bem mais lento (~75 s por página); o comportamento é controlado por `MINERU_OCR_MODE`. Se o MinerU falhar, o worker cai para o PyMuPDF (texto puro, chunks por tokens). Para forçar o modo antigo, defina `EXTRACTOR=pymupdf` no `.env.research`.
+
+**Reingerir um documento** (ex.: após trocar o extrator):
+```bash
+docker exec supabase-db psql -U postgres -d postgres \
+  -c "DELETE FROM documents WHERE source_path = '/imports/meu-artigo.pdf';"
+docker exec research-worker rm /imports/meu-artigo.ingested
+docker restart research-worker
+```
+
 **Acompanhar ingestão:**
 ```bash
 docker logs -f research-worker

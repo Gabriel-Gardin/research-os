@@ -1,8 +1,8 @@
 """
 research-worker / ingest.py
 Pipeline de ingestão de PDFs:
-  1. Extrai texto com PyMuPDF
-  2. Quebra em chunks (por tokens)
+  1. Extrai conteúdo estruturado com MinerU (fallback: texto com PyMuPDF)
+  2. Quebra em chunks (por seção; no fallback, por tokens)
   3. Gera embeddings via OpenAI
   4. Salva no Postgres (deduplicação por SHA-256)
 """
@@ -31,6 +31,7 @@ EMBEDDING_DIM    = int(os.getenv("EMBEDDING_DIM", "1536"))
 CHUNK_SIZE       = int(os.getenv("CHUNK_SIZE", "512"))     # tokens
 CHUNK_OVERLAP    = int(os.getenv("CHUNK_OVERLAP", "64"))   # tokens
 DATABASE_URL     = os.environ["DATABASE_URL"]
+EXTRACTOR        = os.getenv("EXTRACTOR", "mineru")        # "mineru" | "pymupdf"
 
 client   = OpenAI(api_key=OPENAI_API_KEY)
 tokenizer = tiktoken.get_encoding("cl100k_base")
@@ -89,6 +90,7 @@ def chunk_pages(pages: list[dict]) -> Generator[dict, None, None]:
             "chunk_index": c_idx,
             "text":        text.strip(),
             "page_number": page,
+            "section":     None,
             "token_count": len(toks),
         }
         c_idx += 1
@@ -127,6 +129,32 @@ def sha256(path: Path) -> str:
     return h.hexdigest()
 
 
+# ── Extração (MinerU com fallback) ─────────────────────────────────────────────
+
+def extract_document(pdf_path: Path) -> dict:
+    """
+    Retorna {extractor, title, doi, abstract, references, chunks}.
+    Usa MinerU; se falhar (ou EXTRACTOR=pymupdf), cai para PyMuPDF.
+    """
+    if EXTRACTOR == "mineru":
+        try:
+            import extract_mineru
+            log.info("  Extraindo com MinerU (pode levar alguns minutos em CPU)...")
+            return {"extractor": "mineru", **extract_mineru.extract(pdf_path)}
+        except Exception as e:
+            log.warning(f"  MinerU falhou ({e}); usando PyMuPDF.")
+
+    pages = extract_pages(pdf_path)
+    return {
+        "extractor":  "pymupdf",
+        "title":      None,
+        "doi":        None,
+        "abstract":   None,
+        "references": [],
+        "chunks":     list(chunk_pages(pages)),
+    }
+
+
 # ── Ingestão principal ────────────────────────────────────────────────────────
 
 def ingest_pdf(pdf_path: Path, metadata: dict | None = None) -> str | None:
@@ -137,14 +165,29 @@ def ingest_pdf(pdf_path: Path, metadata: dict | None = None) -> str | None:
     file_hash = sha256(pdf_path)
     meta = metadata or {}
 
+    # ── Deduplicação ───────────────────────────────────────────────────────
     with get_conn() as conn, conn.cursor() as cur:
-        # ── Deduplicação ───────────────────────────────────────────────────
         cur.execute("SELECT id FROM documents WHERE file_hash = %s", (file_hash,))
-        row = cur.fetchone()
-        if row:
+        if cur.fetchone():
             log.info(f"Documento já existe (hash={file_hash[:8]}…), pulando.")
             return None
 
+    # ── Extração + chunking (fora da transação: pode levar minutos) ────────
+    doc    = extract_document(pdf_path)
+    chunks = doc["chunks"]
+    log.info(f"  {len(chunks)} chunks ({doc['extractor']})")
+
+    # ── Embeddings ─────────────────────────────────────────────────────────
+    embeddings = embed_in_batches([c["text"] for c in chunks])
+    log.info(f"  {len(embeddings)} embeddings gerados")
+
+    extra = {
+        **meta.get("extra", {}),
+        "extractor":  doc["extractor"],
+        "references": doc["references"],
+    }
+
+    with get_conn() as conn, conn.cursor() as cur:
         # ── Inserir documento ──────────────────────────────────────────────
         doc_id = str(uuid.uuid4())
         cur.execute(
@@ -156,44 +199,35 @@ def ingest_pdf(pdf_path: Path, metadata: dict | None = None) -> str | None:
             """,
             (
                 doc_id,
-                meta.get("title", pdf_path.stem),
+                meta.get("title") or doc["title"] or pdf_path.stem,
                 meta.get("authors", []),
                 meta.get("year"),
                 meta.get("type", "paper"),
                 str(pdf_path),
                 file_hash,
-                meta.get("abstract"),
-                meta.get("doi"),
+                meta.get("abstract") or doc["abstract"],
+                meta.get("doi") or doc["doi"],
                 meta.get("tags", []),
                 meta.get("language", "en"),
-                json.dumps(meta.get("extra", {})),
+                json.dumps(extra),
             ),
         )
         log.info(f"Documento criado: {doc_id} — {pdf_path.name}")
-
-        # ── Extração + chunking ────────────────────────────────────────────
-        pages  = extract_pages(pdf_path)
-        chunks = list(chunk_pages(pages))
-        log.info(f"  {len(pages)} páginas → {len(chunks)} chunks")
-
-        # ── Embeddings ─────────────────────────────────────────────────────
-        texts      = [c["text"] for c in chunks]
-        embeddings = embed_in_batches(texts)
-        log.info(f"  {len(embeddings)} embeddings gerados")
 
         # ── Inserir chunks ─────────────────────────────────────────────────
         for chunk, emb in zip(chunks, embeddings):
             cur.execute(
                 """
                 INSERT INTO chunks (document_id, chunk_index, text,
-                                    page_number, token_count, embedding)
-                VALUES (%s,%s,%s,%s,%s,%s::vector)
+                                    page_number, section, token_count, embedding)
+                VALUES (%s,%s,%s,%s,%s,%s,%s::vector)
                 """,
                 (
                     doc_id,
                     chunk["chunk_index"],
                     chunk["text"].replace("\x00", ""),
                     chunk["page_number"],
+                    chunk["section"],
                     chunk["token_count"],
                     json.dumps(emb),   # psycopg2 → pgvector aceita JSON array
                 ),

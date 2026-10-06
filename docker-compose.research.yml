@@ -45,6 +45,9 @@ services:
       EMBEDDING_DIM: 1536
       CHUNK_SIZE: 512
       CHUNK_OVERLAP: 64
+      EXTRACTOR: ${EXTRACTOR:-mineru}   # "mineru" ou "pymupdf"
+      MINERU_TIER: ${MINERU_TIER:-standard}
+      MINERU_OCR_MODE: ${MINERU_OCR_MODE:-detect}   # detect | auto | txt | ocr
     volumes:
       - imports:/imports
       - ./research-worker:/app   # hot-reload em dev

@@ -1,4 +1,5 @@
-pymupdf==1.24.11          # extração de texto de PDFs
+pymupdf==1.24.11          # extração de texto de PDFs (fallback)
+mineru==4.0.10            # extração estruturada (LaTeX, seções), roda local em CPU
 openai>=1.52.0            # embeddings
 psycopg2-binary==2.9.9    # postgres
 watchdog==4.0.1           # monitoramento de pasta
