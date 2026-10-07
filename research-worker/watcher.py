@@ -6,6 +6,7 @@ Também processa o que já existe ao iniciar.
 
 import logging
 import os
+import queue
 import time
 from pathlib import Path
 
@@ -68,12 +69,19 @@ def process(path: Path):
 
 # ── Watchdog handler ──────────────────────────────────────────────────────────
 
+# Fila única: o observer só enfileira, e a thread principal processa um PDF
+# por vez. Assim arquivos que chegam durante uma ingestão longa não se perdem.
+pending: queue.Queue[Path] = queue.Queue()
+
+
 class PDFHandler(FileSystemEventHandler):
     def on_created(self, event: FileCreatedEvent):
         if not event.is_directory:
-            # Pequeno delay para garantir que o arquivo foi totalmente copiado
-            time.sleep(1.5)
-            process(Path(event.src_path))
+            pending.put(Path(event.src_path))
+
+    def on_moved(self, event):
+        if not event.is_directory:
+            pending.put(Path(event.dest_path))
 
 
 # ── Entrypoint ────────────────────────────────────────────────────────────────
@@ -82,21 +90,30 @@ def main():
     IMPORTS_DIR.mkdir(parents=True, exist_ok=True)
     log.info(f"Research Worker iniciado. Monitorando: {IMPORTS_DIR}")
 
-    # Processa arquivos que já existem
-    log.info("Verificando PDFs existentes...")
-    for pdf in sorted(IMPORTS_DIR.glob("*.pdf")):
-        process(pdf)
-
-    # Inicia monitoramento de novos arquivos
+    # Inicia o monitoramento antes de varrer o que já existe
     handler  = PDFHandler()
     observer = Observer()
     observer.schedule(handler, str(IMPORTS_DIR), recursive=False)
     observer.start()
-    log.info("Aguardando novos PDFs...")
+
+    log.info("Verificando PDFs existentes...")
+    for pdf in sorted(IMPORTS_DIR.glob("*.pdf")):
+        pending.put(pdf)
 
     try:
         while True:
-            time.sleep(5)
+            try:
+                path = pending.get(timeout=5)
+            except queue.Empty:
+                continue
+            if path.suffix.lower() != ".pdf" or already_processed(path):
+                continue
+            # Pequeno delay para garantir que o arquivo foi totalmente copiado
+            time.sleep(1.5)
+            if path.exists():
+                process(path)
+            if pending.empty():
+                log.info("Aguardando novos PDFs...")
     except KeyboardInterrupt:
         observer.stop()
     observer.join()
