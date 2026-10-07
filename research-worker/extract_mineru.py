@@ -34,7 +34,7 @@ tokenizer = tiktoken.get_encoding("cl100k_base")
 # Blocos de layout que não são conteúdo
 SKIP_TYPES   = {"header", "footer", "page_number", "page_footnote"}
 REFS_TITLE   = re.compile(r"^\s*(\d+\.?\s*)?(references|bibliography|refer[êe]ncias)", re.I)
-DOI_PATTERN  = re.compile(r"\b10\.\d{4,9}/[^\s\"<>]+")
+DOI_PATTERN  = re.compile(r"\b10\.\d{4,9}/[^\s\"<>\[\]]+")
 
 
 # ── Camada de texto quebrada ───────────────────────────────────────────────────
@@ -93,7 +93,11 @@ def _find_doi(*texts: str) -> str | None:
     for text in texts:
         m = DOI_PATTERN.search(text or "")
         if m:
-            return m.group(0).rstrip(".,;)")
+            doi = m.group(0).rstrip(".,;")
+            # ")" final só faz parte do DOI se fechar um "(" do próprio DOI
+            while doi.endswith(")") and doi.count(")") > doi.count("("):
+                doi = doi[:-1].rstrip(".,;")
+            return doi
     return None
 
 
