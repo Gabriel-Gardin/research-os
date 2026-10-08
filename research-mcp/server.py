@@ -41,7 +41,7 @@ MCP_PORT        = int(os.getenv("MCP_PORT", "8080"))
 MCP_TRANSPORT   = os.getenv("MCP_TRANSPORT", "sse")   # "sse" | "stdio"
 
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
-mcp = FastMCP("Research OS", port=MCP_PORT)
+mcp = FastMCP("Research OS", host="0.0.0.0", port=MCP_PORT)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -569,4 +569,9 @@ if __name__ == "__main__":
     if MCP_TRANSPORT == "stdio":
         mcp.run(transport="stdio")
     else:
-        mcp.run(transport="sse")
+        # HTTP: streamable HTTP em /mcp (claude.ai) e SSE legado em /sse (Claude Code)
+        import uvicorn
+
+        app = mcp.streamable_http_app()
+        app.router.routes.extend(mcp.sse_app().routes)
+        uvicorn.run(app, host="0.0.0.0", port=MCP_PORT)

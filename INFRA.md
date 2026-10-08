@@ -122,12 +122,14 @@ As tools aparecem listadas como `mcp__research-os__*`. O registro é persistente
 
 **Importante:** para lembretes via Google Calendar, sempre use a tool `create_reminder` do MCP explicitamente — nunca use `CronCreate` ou outros mecanismos nativos do Claude Code, pois eles não persistem entre sessões e não integram com o Google Calendar.
 
-### Claude.ai (remote MCP via SSE)
+### Claude.ai (remote MCP via streamable HTTP)
 
-Configure um túnel público (ex: ngrok) e adicione em Claude.ai > Settings > Integrations:
+O servidor expõe dois transportes na porta 8080: streamable HTTP em `/mcp` (usado pelo claude.ai) e SSE legado em `/sse` (usado pelo registro local do Claude Code).
+
+Abra um túnel público com domínio fixo (ex: `ngrok http --url=SEU-DOMINIO.ngrok-free.dev 8080`) e adicione em Claude.ai > Settings > Connectors, sem autenticação:
 
 ```
-URL: http://localhost:8080/sse
+URL: https://SEU-DOMINIO.ngrok-free.dev/mcp
 ```
 
 ---
